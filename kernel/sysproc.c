@@ -95,3 +95,14 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64 
+sys_trace()
+{
+  int id;
+  
+  if (argint(0, &id) < 0)
+    return -1;
+  myproc()->trmask = id; 
+  return 0;
+}
