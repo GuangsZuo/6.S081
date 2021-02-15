@@ -155,8 +155,8 @@ kvmmap(uint64 va, uint64 pa, uint64 sz, int perm)
 void
 uvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, int perm)
 {
-	if (mappages(pagetable, va, sz, pa, perm) != 0)
-		panic("uvmmap");
+   if (mappages(pagetable, va, sz, pa, perm) != 0)
+     panic("uvmmap");
 }
 // translate a kernel virtual address to
 // a physical address. only needed for
@@ -191,13 +191,11 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
-    if((pte = walk(pagetable, a, 1)) == 0)
-      return -1;
+    if((pte = walk(pagetable, a, 1)) == 0) return -1;
     if(*pte & PTE_V)
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
-    if(a == last)
-      break;
+    if(a == last) break; 
     a += PGSIZE;
     pa += PGSIZE;
   }
@@ -257,7 +255,7 @@ uvminit(pagetable_t pagetable, pagetable_t usr_kpgtbl, uchar *src, uint sz)
   mem = kalloc();
   memset(mem, 0, PGSIZE);
   mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
-	mappages(usr_kpgtbl, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X);
+  mappages(usr_kpgtbl, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X);
   memmove(mem, src, sz);
 }
 
@@ -320,7 +318,8 @@ freewalk(pagetable_t pagetable)
       uint64 child = PTE2PA(pte);
       freewalk((pagetable_t)child);
       pagetable[i] = 0;
-		}
+     }
+     else if ((pte & PTE_V) == 0) break;
   }
   kfree((void*)pagetable);
 }
@@ -331,16 +330,16 @@ realvmprint(pagetable_t pagetable, int depth) {
   char * prefix_s;
   switch (depth) {
     case 1: prefix_s = ".."; break ; 
-		case 2: prefix_s = ".. .."; break; 
-		case 3: prefix_s = ".. .. .."; break; 
-		default: prefix_s= ""; break; 
+    case 2: prefix_s = ".. .."; break; 
+    case 3: prefix_s = ".. .. .."; break; 
+    default: prefix_s= ""; break; 
   }
 
   // there are 2^9 = 512 PTEs in a page table.
   for(int i = 0; i < 512; i++){
     pte_t pte = pagetable[i];
     uint64 child = PTE2PA(pte);
-		if ((pte & PTE_V)==0) continue;
+    if ((pte & PTE_V)==0) continue;
     printf("%s%d: pte %p pa %p\n", prefix_s, i, pagetable[i], child);
     if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
       // this PTE points to a lower-level page table.
@@ -353,8 +352,8 @@ realvmprint(pagetable_t pagetable, int depth) {
 void 
 vmprint(pagetable_t pagetable) 
 {
-   printf("page table %p\n", pagetable);
-	 realvmprint(pagetable, 1);
+   printf("page table %p\n", pagetable); 
+   realvmprint(pagetable, 1);
 }
 
 // Free user memory pages,
@@ -423,14 +422,17 @@ uvmclear(pagetable_t pagetable, uint64 va)
 int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
-  uint64 n, va0; 
+  uint64 n, va0, pa0; 
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    pa0 = walkaddr(pagetable, va0);
+    if(pa0 == 0)
+      return -1;
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
-    memmove((void *)(va0 + (dstva - va0)), src, n);
+    memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
     src += n;
@@ -443,22 +445,10 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 // Copy len bytes to dst from virtual address srcva in a given page table.
 // Return 0 on success, -1 on error.
 int
-copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
+copyin(pagetable_t pagetable, char *dst, uint64 src, uint64 len)
 {
-  uint64 n, va0;
-  // Now H/w will take the va0 translate so we could just programming with virtual addr
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    copyin_new(dst, va0 + (srcva - va0), n);
+  return copyin_new(dst, src, len);
 
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
 }
 
 
@@ -467,25 +457,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 // until a '\0', or max.
 // Return 0 on success, -1 on error.
 int
-copyinstr(pagetable_t pagetable,char *dst, uint64 srcva, uint64 max)
+copyinstr(pagetable_t pagetable,char *dst, uint64 src, uint64 max)
 {
-  uint64 n, va0;
-  int got_null = 0;
-
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
-
-		copyinstr_new(dst, va0 + (srcva - va0), n);
-		max -=n ;
-		dst +=n ;
-    srcva = va0 + PGSIZE;
-  }
-  if(got_null){
-    return 0;
-  } else {
-    return -1;
-  }
+    return copyinstr_new(dst, src, max);
 }

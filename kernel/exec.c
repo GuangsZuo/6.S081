@@ -19,7 +19,7 @@ exec(char *path, char **argv)
   struct inode *ip;
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
-	pagetable_t usr_kpgtbl = 0, old_usr_kpgtbl; 
+  pagetable_t usr_kpgtbl = 0, old_usr_kpgtbl; 
   struct proc *p = myproc();
 
   begin_op();
@@ -37,6 +37,8 @@ exec(char *path, char **argv)
     goto bad;
 
   if((pagetable = proc_pagetable(p)) == 0)
+    goto bad;
+  if((usr_kpgtbl = uvmcreatekpgtbl()) == 0) 
     goto bad;
 
   // Load program into memory.
@@ -112,13 +114,17 @@ exec(char *path, char **argv)
   // Commit to the user image.
   oldpagetable = p->pagetable;
   p->pagetable = pagetable;
-	old_usr_kpgtbl = p->kernel_pagetable;
-	p->kernel_pagetable = usr_kpgtbl;
+  old_usr_kpgtbl = p->kernel_pagetable;
+  p->kernel_pagetable = usr_kpgtbl;
+  printf("oldusrpagetable:\n");
+  vmprint(old_usr_kpgtbl);
+  printf("usrpagetable:\n");
+  vmprint(usr_kpgtbl);
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
-	freewalk(old_usr_kpgtbl);
+  freewalk(old_usr_kpgtbl);
 
   if (p->pid==1) vmprint(p->pagetable);
 
@@ -127,8 +133,8 @@ exec(char *path, char **argv)
  bad:
   if(pagetable)
     proc_freepagetable(pagetable, sz);
-	if (usr_kpgtbl)
-		freewalk(usr_kpgtbl);
+  if (usr_kpgtbl)
+    freewalk(usr_kpgtbl);
   if(ip){
     iunlockput(ip);
     end_op();

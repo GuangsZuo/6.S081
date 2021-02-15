@@ -22,7 +22,6 @@ static void freeproc(struct proc *p);
 extern char trampoline[]; // trampoline.S
 
 // initialize the proc table at boot time.
-/*
 void
 procinit(void)
 {
@@ -31,7 +30,7 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
-
+      /*
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
@@ -41,27 +40,19 @@ procinit(void)
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
+      */
   }
   kvminithart();
 }
-*/
-void procinit(struct proc *p) 
+void proc_kstack(struct proc *p) 
 {
-      initlock(&p->lock, "proc");
-
-      // Allocate a page for the process's kernel stack.
-      // Map it high in memory, followed by an invalid
-      // guard page.
-			//
-			// Now you need to add this kernel stack mapping to p->kernel_pagetable 
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
-			//mappages(p->kernel_pagetable, va, PGSIZE, pa, PTE_R | PTE_W);
-			uvmmap(p->kernel_pagetable, va, (uint64)pa, PGSIZE, PTE_R|PTE_W);
+   char *pa = kalloc();
+   if(pa == 0)
+      panic("kalloc");
+   uint64 va = KSTACK((int) (p - proc));
+   kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+   p->kstack = va;
+   uvmmap(p->kernel_pagetable, va, (uint64)pa, PGSIZE, PTE_R|PTE_W);
 }
 
 // Must be called with interrupts disabled,
@@ -141,14 +132,14 @@ found:
     return 0;
   }
 
-	// kernel page table & kernel stack
-	p->kernel_pagetable = uvmcreatekpgtbl();
-	if (p->kernel_pagetable ==0){
-		freeproc(p);
-		release(&p->lock);
-		return 0;
-	}
-	procinit(p);
+  // kernel page table & kernel stack
+  p->kernel_pagetable = uvmcreatekpgtbl();
+  if (p->kernel_pagetable ==0){
+     freeproc(p);
+     release(&p->lock);
+     return 0; 
+  }
+  proc_kstack(p);
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -170,9 +161,9 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
-	if (p->kernel_pagetable)
-		freewalk(p->kernel_pagetable);
-	p->kernel_pagetable=0;
+  if (p->kernel_pagetable)
+    freewalk(p->kernel_pagetable);
+  p->kernel_pagetable=0;
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -262,7 +253,12 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+ /* 
+  printf("initproc pagetable:\n");
+  vmprint(p->pagetable);
+  printf("initproc kernel_pagetable:\n");
+  vmprint(p->kernel_pagetable);
+ */
   release(&p->lock);
 }
 
@@ -507,8 +503,8 @@ scheduler(void)
         p->state = RUNNING;
         c->proc = p;
 
-			  w_satp(MAKE_SATP(p->kernel_pagetable));
- 			  sfence_vma();
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+ 	sfence_vma();
 	
         swtch(&c->context, &p->context);
 
@@ -523,7 +519,7 @@ scheduler(void)
 #if !defined (LAB_FS)
     if(found == 0) {
       intr_on();
-			kvminithart();
+      kvminithart();
       asm volatile("wfi");
     }
 #else
