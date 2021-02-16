@@ -132,3 +132,20 @@ printfinit(void)
   initlock(&pr.lock, "pr");
   pr.locking = 1;
 }
+
+void backtrace() 
+{
+   uint64 fp = r_fp();
+   int max_bt_depth = 12;
+   uint64 saved[12];
+   int bt_depth = 0;
+
+   for (; bt_depth<max_bt_depth; ++bt_depth) {
+       saved[bt_depth] = *(uint64*)(fp-8);
+       fp = *(uint64*)(fp-16);
+       if (PGROUNDDOWN(fp) == fp) break;
+   }
+   printf("backtrace:\n");
+   for (int i=0; i<=bt_depth; ++i) 
+     printf("%p\n", saved[i]);
+}
