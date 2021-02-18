@@ -1,0 +1,5 @@
+1. a0,a1,a2 contains the arguments of function, a2 hold 13
+ 2,  just inline function, optmized by compilier
+3, 0x628
+4. 38 
+ 
