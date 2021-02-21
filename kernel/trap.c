@@ -67,12 +67,40 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } else if(r_scause() == 15 || r_scause() == 13) {
+
+    if (r_stval() >= p->sz ) {
+	p->killed = 1;
+	goto killed; 
+    }
+
+    uint64 va = PGROUNDDOWN(r_stval());
+    pagetable_t pagetable = p->pagetable; 
+    pte_t* pte = walk(pagetable, va, 0);
+    if (pte !=0 && *pte & (1L<<7)) { // that is userstack guard page
+	printf("stack overflow\n");
+        p->killed = 1;
+	goto killed; 
+    }
+    char* mem = kalloc();
+    if (mem==0) {
+	p->killed = 1;
+    } else {
+	memset(mem, 0, PGSIZE);
+	if (mappages(pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U) !=0 ){
+           kfree(mem);
+           p->killed = 1;
+	}
+    }
+  } else if (r_scause() == 13) {
+    printf("load page fault, just return");
+  }
+    else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+  killed: 
   if(p->killed)
     exit(-1);
 
