@@ -22,21 +22,24 @@ simpletest()
     printf("sbrk(%d) failed\n", sz);
     exit(-1);
   }
-
+  printf("sbrk done.\n");
   for(char *q = p; q < p + sz; q += 4096){
     *(int*)q = getpid();
   }
-
+  printf("starting fork...\n");
   int pid = fork();
   if(pid < 0){
     printf("fork() failed\n");
     exit(-1);
   }
 
-  if(pid == 0)
+  if(pid == 0) {
+    printf("exiting..\n");
     exit(0);
+   }
 
   wait(0);
+  printf("fork exit.\n");
 
   if(sbrk(-sz) == (char*)0xffffffffffffffffL){
     printf("sbrk(-%d) failed\n", sz);

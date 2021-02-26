@@ -10,7 +10,7 @@
 #include "defs.h"
 
 void freerange(void *pa_start, void *pa_end);
-
+void kfree(void* pa);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
@@ -22,6 +22,8 @@ struct {
   struct spinlock lock;
   struct run *freelist;
 } kmem;
+
+int refs[MAXPG];
 
 void
 kinit()
@@ -35,8 +37,17 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
+    refs[(uint64)p/PGSIZE] = 0;
     kfree(p);
+   }
+}
+
+void krefcount(uint64 pa, int c) {
+     acquire(&kmem.lock);
+     refs[pa/PGSIZE] += c;
+     release(&kmem.lock);
+     if (refs[pa/PGSIZE]==0) kfree((void*)pa);
 }
 
 // Free the page of physical memory pointed at by v,
@@ -57,6 +68,15 @@ kfree(void *pa)
   r = (struct run*)pa;
 
   acquire(&kmem.lock);
+  if (refs[(uint64)pa/PGSIZE] > 0) {
+      refs[(uint64)pa/PGSIZE] --; 
+      if (refs[(uint64)pa/PGSIZE] == 0) {
+	  r->next = kmem.freelist;
+	  kmem.freelist = r;
+      }
+      release(&kmem.lock);
+      return ; 
+  }
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -72,11 +92,14 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r) {
     kmem.freelist = r->next;
+    refs[(uint64)r/PGSIZE] = 1;
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+

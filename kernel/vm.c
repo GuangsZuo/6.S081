@@ -311,7 +311,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -320,6 +319,18 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
+    // just map to same phy mem, no need to copy for now. 
+    if (mappages(new, i, PGSIZE, pa, (flags | (1L<<7)) & (~PTE_W))!=0) {
+	goto err;
+    }
+    // label the old as cow page and not writable 
+    *pte &= ~PTE_W; 
+    *pte |= (1L<<7);
+
+    //add the ref count
+    krefcount(pa, 1); 
+
+    /*
     if((mem = kalloc()) == 0)
       goto err;
     memmove(mem, (char*)pa, PGSIZE);
@@ -327,6 +338,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       kfree(mem);
       goto err;
     }
+    */
   }
   return 0;
 
@@ -347,6 +359,22 @@ uvmclear(pagetable_t pagetable, uint64 va)
     panic("uvmclear");
   *pte &= ~PTE_U;
 }
+// handle copy-on-write page fault
+uint64 
+handlecow(pagetable_t pagetable, pte_t* pte, uint64 va){
+    char* mem = kalloc();
+    if (mem == 0) {
+       return 0; 
+    } else {
+       uint64 pa = PTE2PA(*pte);
+       uint64 flags = (PTE_FLAGS(*pte) | PTE_W) & (~(1L<<7)); 
+       memmove(mem, (char*)pa, PGSIZE);
+       *pte = PA2PTE((uint64)mem) | flags ;
+       // dec the ref_count of the cow page
+       krefcount(pa, -1); 
+    } 
+    return (uint64)mem;
+}
 
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
@@ -355,11 +383,26 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  pte_t *pte;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+
+  if(va0 >= MAXVA)
+    return -1;
+
+  pte = walk(pagetable, va0, 0);
+  if(pte == 0)
+    return -1;
+  if((*pte & PTE_V) == 0)
+    return -1;
+  if((*pte & PTE_U) == 0)
+    return -1;
+   if ((*pte & (1L<<7)))
+    pa0=handlecow(pagetable, pte, va0);
+   else 
+    pa0 = PTE2PA(*pte);
+   if(pa0 == 0)
       return -1;
     n = PGSIZE - (dstva - va0);
     if(n > len)

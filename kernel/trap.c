@@ -65,14 +65,54 @@ usertrap(void)
     intr_on();
 
     syscall();
+  } else if (r_scause() == 15 ) { 
+    // first checking whether it is caused by CoW
+    uint64 va = PGROUNDDOWN(r_stval());
+    pagetable_t pagetable = p->pagetable;
+    pte_t* pte = walk(pagetable, va, 0);
+    if (pte==0 || (*pte &(1L<<7)) == 0) {
+       p->killed = 1; 
+       goto killed; 
+    } 
+    // handle CoW 
+    if (handlecow(pagetable, pte, va) == 0) {
+        p->killed = 1;
+    }
+    /*
+    char* mem = kalloc();
+    if (mem == 0) {
+       p->killed = 1;
+    } else {
+       uint64 pa = PTE2PA(*pte);
+       flags = PTE_FLAGS(*pte);
+       memmove(mem, (char*)pa, PGSIZE);
+       if (mappages(pagetable, va, PGSIZE, (uint64)mem, PTE_W|flags & (~(1L<<7)) != 0) {
+	   kfree(mem);
+	   krefcount(pa,-1);
+	   p->killed = 1;
+	   goto killed;
+       }
+       
+       // dec the ref_count of the cow page
+       krefcount(pa, -1); 
+    } 
+    */
+
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+    uint64 va = PGROUNDDOWN(r_stval());
+    pagetable_t pagetable = p->pagetable;
+    pte_t* pte = walk(pagetable, va, 0);
+    printf(" %p\n",*pte);
+    if (pte==0 || (*pte & PTE_X) == 0) {
+	   printf("invalid pte_x");
+    } 
     p->killed = 1;
   }
-
+  killed:
   if(p->killed)
     exit(-1);
 
