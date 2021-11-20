@@ -23,12 +23,18 @@ struct {
   struct run *freelist;
 } kmem;
 
-int refs[MAXPG];
+
+
+struct {
+  struct spinlock lock;
+  int refcount[MAXPG];
+} kref;
 
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&kref.lock, "kref");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -38,16 +44,16 @@ freerange(void *pa_start, void *pa_end)
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
-    refs[(uint64)p/PGSIZE] = 0;
+    kref.refcount[(uint64)p/PGSIZE] = 1;
+    //krefcount((uint64)p, 1);
     kfree(p);
-   }
+   }       
 }
 
 void krefcount(uint64 pa, int c) {
-     acquire(&kmem.lock);
-     refs[pa/PGSIZE] += c;
-     release(&kmem.lock);
-     if (refs[pa/PGSIZE]==0) kfree((void*)pa);
+     acquire(&kref.lock);
+     kref.refcount[pa/PGSIZE] += c;
+     release(&kref.lock);
 }
 
 // Free the page of physical memory pointed at by v,
@@ -62,21 +68,25 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  int zeroref = 0;
+  acquire(&kref.lock);
+  kref.refcount[(uint64)pa/PGSIZE] --; 
+  if (kref.refcount[(uint64)pa/PGSIZE] == 0) 
+    zeroref = 1; 
+  else if (kref.refcount[(uint64)pa/PGSIZE] < 0) 
+    panic("free error");
+  else 
+    zeroref = 0;
+  release(&kref.lock);
+
+  if (!zeroref) return;
+
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
 
   acquire(&kmem.lock);
-  if (refs[(uint64)pa/PGSIZE] > 0) {
-      refs[(uint64)pa/PGSIZE] --; 
-      if (refs[(uint64)pa/PGSIZE] == 0) {
-	  r->next = kmem.freelist;
-	  kmem.freelist = r;
-      }
-      release(&kmem.lock);
-      return ; 
-  }
   r->next = kmem.freelist;
   kmem.freelist = r;
   release(&kmem.lock);
@@ -88,18 +98,23 @@ kfree(void *pa)
 void *
 kalloc(void)
 {
-  struct run *r;
+  struct run *r=0;
 
   acquire(&kmem.lock);
   r = kmem.freelist;
+
   if(r) {
     kmem.freelist = r->next;
-    refs[(uint64)r/PGSIZE] = 1;
+    acquire(&kref.lock);
+    kref.refcount[(uint64)r/PGSIZE] = 1;
+    release(&kref.lock);
   }
+
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+
   return (void*)r;
 }
 

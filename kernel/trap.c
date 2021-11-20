@@ -70,7 +70,7 @@ usertrap(void)
     uint64 va = PGROUNDDOWN(r_stval());
     pagetable_t pagetable = p->pagetable;
     pte_t* pte = walk(pagetable, va, 0);
-    if (pte==0 || (*pte &(1L<<7)) == 0) {
+    if (pte==0 || (*pte & PTE_W) != 0) {
        p->killed = 1; 
        goto killed; 
     } 
@@ -103,13 +103,13 @@ usertrap(void)
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    uint64 va = PGROUNDDOWN(r_stval());
-    pagetable_t pagetable = p->pagetable;
-    pte_t* pte = walk(pagetable, va, 0);
-    printf(" %p\n",*pte);
-    if (pte==0 || (*pte & PTE_X) == 0) {
-	   printf("invalid pte_x");
-    } 
+    // uint64 va = PGROUNDDOWN(r_stval());
+    // pagetable_t pagetable = p->pagetable;
+    // pte_t* pte = walk(pagetable, va, 0);
+    // printf(" %p\n",*pte);
+    // if (pte==0 || (*pte & PTE_X) == 0) {
+	  //  printf("invalid pte_x");
+    // } 
     p->killed = 1;
   }
   killed:
